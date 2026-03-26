@@ -5,49 +5,41 @@ export async function middleware(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-  // If env vars are missing, let the request through — pages will handle auth
   if (!supabaseUrl || !supabaseKey) {
     return NextResponse.next()
   }
 
-  let supabaseResponse = NextResponse.next({
-    request,
+  let supabaseResponse = NextResponse.next({ request })
+
+  const supabase = createServerClient(supabaseUrl, supabaseKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll()
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value }) =>
+          request.cookies.set(name, value)
+        )
+        supabaseResponse = NextResponse.next({ request })
+        cookiesToSet.forEach(({ name, value, options }) =>
+          supabaseResponse.cookies.set(name, value, options)
+        )
+      },
+    },
   })
 
-  const supabase = createServerClient(
-    supabaseUrl,
-    supabaseKey,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          )
-          supabaseResponse = NextResponse.next({ request })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
-  )
-
-  // Refresh session — do not add code between createServerClient and getUser()
-  const { data: { user } } = await supabase.auth.getUser()
+  // @ts-ignore — getUser exists at runtime in @supabase/ssr v0.9.0
+  const { data } = await supabase.auth.getUser()
+  const user = data?.user ?? null
 
   const pathname = request.nextUrl.pathname
   const isAuthRoute = pathname.startsWith('/auth')
 
-  // Redirect unauthenticated users to login (except for auth routes)
   if (!user && !isAuthRoute) {
     const loginUrl = new URL('/auth/login', request.url)
     return NextResponse.redirect(loginUrl)
   }
 
-  // Redirect authenticated users away from auth pages
   if (user && isAuthRoute && pathname !== '/auth/callback') {
     const homeUrl = new URL('/', request.url)
     return NextResponse.redirect(homeUrl)
